@@ -9,6 +9,7 @@ pub use metrics::{PoolMetrics, PoolMetricsSnapshot};
 use crate::config::SchedulerMode;
 use crate::error::PoolError;
 use crate::scheduler::PoolBackend;
+use crate::task::Job;
 
 /// Configurable thread pool with FIFO or work-stealing scheduling.
 pub struct SchedulitePool {
@@ -49,6 +50,18 @@ impl SchedulitePool {
         F: FnOnce() + Send + 'static,
     {
         self.backend.submit(Box::new(f))?;
+        self.metrics.record_submitted();
+        Ok(())
+    }
+
+    /// Enqueues a job on a worker's local queue (steal mode only).
+    /// In FIFO mode this falls back to the shared channel.
+    pub fn submit_to_worker<F>(&self, worker_id: usize, f: F) -> Result<(), PoolError>
+    where
+        F: FnOnce() + Send + 'static,
+    {
+        let job: Job = Box::new(f);
+        self.backend.submit_to_worker(worker_id, job)?;
         self.metrics.record_submitted();
         Ok(())
     }
@@ -140,5 +153,52 @@ mod tests {
         assert_eq!(m.completed, 90);
         assert_eq!(m.panicked, 10);
         assert_eq!(m.completed + m.panicked, m.submitted);
+    }
+
+    fn run_counter_pool(mode: SchedulerMode, workers: usize, tasks: usize) -> u64 {
+        let mut pool = SchedulitePool::with_mode(workers, mode);
+        let counter = Arc::new(Mutex::new(0));
+        for _ in 0..tasks {
+            let counter = Arc::clone(&counter);
+            pool.submit(move || {
+                thread::sleep(Duration::from_millis(1));
+                *counter.lock().unwrap() += 1;
+            })
+            .unwrap();
+        }
+        pool.shutdown().unwrap();
+        *counter.lock().unwrap()
+    }
+
+    #[test]
+    fn fifo_vs_steal_produce_same_results() {
+        let fifo = run_counter_pool(SchedulerMode::Fifo, 4, 40);
+        let steal = run_counter_pool(SchedulerMode::Steal, 4, 40);
+        assert_eq!(fifo, 40);
+        assert_eq!(steal, 40);
+    }
+
+    #[test]
+    fn steal_handles_skewed_local_submissions() {
+        let mut pool = SchedulitePool::with_mode(4, SchedulerMode::Steal);
+        let counter = Arc::new(Mutex::new(0));
+        for i in 0..400 {
+            let counter = Arc::clone(&counter);
+            let job = move || {
+                for _ in 0..200 {
+                    *counter.lock().unwrap() += 1;
+                }
+            };
+            if i < 360 {
+                pool.submit_to_worker(0, job).unwrap();
+            } else {
+                pool.submit(job).unwrap();
+            }
+        }
+        pool.shutdown().unwrap();
+        let m = pool.metrics_snapshot();
+        assert_eq!(*counter.lock().unwrap(), 400 * 200);
+        assert_eq!(m.completed, 400);
+        assert!(m.stolen > 0);
     }
 }
