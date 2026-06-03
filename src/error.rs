@@ -12,6 +12,8 @@ pub enum PoolError {
     QueueFull,
     /// Worker threads could not be stopped cleanly.
     ShutdownFailed,
+    /// Shutdown did not complete within the given timeout.
+    ShutdownTimeout,
 }
 
 impl fmt::Display for PoolError {
@@ -20,6 +22,7 @@ impl fmt::Display for PoolError {
             PoolError::SubmitFailed => "failed to submit job",
             PoolError::QueueFull => "bounded queue is full",
             PoolError::ShutdownFailed => "failed to shutdown pool",
+            PoolError::ShutdownTimeout => "shutdown timed out",
         })
     }
 }

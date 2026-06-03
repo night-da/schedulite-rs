@@ -3,6 +3,7 @@
 mod metrics;
 
 use std::sync::Arc;
+use std::time::Duration;
 
 pub use metrics::{PoolMetrics, PoolMetricsSnapshot};
 
@@ -72,6 +73,7 @@ pub struct SchedulitePool {
     mode: SchedulerMode,
     metrics: Arc<PoolMetrics>,
     backend: PoolBackend,
+    timed_out: bool,
 }
 
 impl SchedulitePool {
@@ -105,6 +107,7 @@ impl SchedulitePool {
             mode: config.mode,
             metrics,
             backend,
+            timed_out: false,
         }
     }
 
@@ -145,11 +148,27 @@ impl SchedulitePool {
     pub fn shutdown(&mut self) -> Result<(), PoolError> {
         self.backend.shutdown()
     }
+
+    /// Initiates shutdown and returns immediately if workers finish within `timeout`.
+    ///
+    /// Returns [`PoolError::ShutdownTimeout`] if workers do not finish in time.
+    /// Workers that are still running are detached when the pool is dropped.
+    pub fn shutdown_timeout(&mut self, timeout: Duration) -> Result<(), PoolError> {
+        match self.backend.shutdown_timeout(timeout) {
+            Err(PoolError::ShutdownTimeout) => {
+                self.timed_out = true;
+                Err(PoolError::ShutdownTimeout)
+            }
+            other => other,
+        }
+    }
 }
 
 impl Drop for SchedulitePool {
     fn drop(&mut self) {
-        let _ = self.shutdown();
+        if !self.timed_out {
+            let _ = self.shutdown();
+        }
     }
 }
 
@@ -276,6 +295,31 @@ mod tests {
             .build();
         assert_eq!(pool.mode(), SchedulerMode::Steal);
         pool.submit(|| {}).unwrap();
+    }
+
+    #[test]
+    fn shutdown_timeout_completes_promptly() {
+        let mut pool = SchedulitePool::new(1);
+        pool.submit(|| {}).unwrap();
+        let result = pool.shutdown_timeout(Duration::from_secs(5));
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn shutdown_timeout_returns_error_for_slow_task() {
+        let mut pool = SchedulitePool::new(1);
+        pool.submit(|| thread::sleep(Duration::from_secs(10)))
+            .unwrap();
+        let result = pool.shutdown_timeout(Duration::from_millis(10));
+        assert_eq!(result, Err(PoolError::ShutdownTimeout));
+    }
+
+    #[test]
+    fn shutdown_timeout_works_with_steal() {
+        let mut pool = SchedulitePool::with_mode(1, SchedulerMode::Steal);
+        pool.submit(|| {}).unwrap();
+        let result = pool.shutdown_timeout(Duration::from_secs(5));
+        assert!(result.is_ok());
     }
 
     #[test]

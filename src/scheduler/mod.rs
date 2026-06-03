@@ -4,6 +4,7 @@ mod fifo;
 mod steal;
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use crate::config::{PoolConfig, SchedulerMode};
 use crate::error::PoolError;
@@ -46,6 +47,13 @@ impl PoolBackend {
         match self {
             Self::Fifo(b) => b.shutdown(),
             Self::Steal(b) => b.shutdown(),
+        }
+    }
+
+    pub fn shutdown_timeout(&mut self, timeout: Duration) -> Result<(), PoolError> {
+        match self {
+            Self::Fifo(b) => b.shutdown_timeout(timeout),
+            Self::Steal(b) => b.shutdown_timeout(timeout),
         }
     }
 }

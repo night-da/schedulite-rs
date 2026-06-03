@@ -4,6 +4,7 @@ use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
+use std::time::{Duration, Instant};
 
 use crate::config::PoolConfig;
 use crate::error::PoolError;
@@ -101,10 +102,30 @@ impl StealBackend {
     }
 
     pub fn shutdown(&mut self) -> Result<(), PoolError> {
-        if self.workers.is_empty() {
-            return Ok(());
+        self.signal_drain();
+        self.join_workers()
+    }
+
+    pub fn shutdown_timeout(&mut self, timeout: Duration) -> Result<(), PoolError> {
+        self.signal_drain();
+
+        let deadline = Instant::now() + timeout;
+        loop {
+            if self.workers.iter().all(|h| h.is_finished()) {
+                return self.join_workers();
+            }
+            if Instant::now() >= deadline {
+                return Err(PoolError::ShutdownTimeout);
+            }
+            thread::sleep(Duration::from_millis(1));
         }
+    }
+
+    fn signal_drain(&mut self) {
         self.draining.store(true, Ordering::Relaxed);
+    }
+
+    fn join_workers(&mut self) -> Result<(), PoolError> {
         for handle in self.workers.drain(..) {
             handle.join().map_err(|_| PoolError::ShutdownFailed)?;
         }

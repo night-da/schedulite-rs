@@ -2,6 +2,7 @@
 
 use std::sync::{mpsc, Arc, Mutex};
 use std::thread::{self, JoinHandle};
+use std::time::{Duration, Instant};
 
 use crate::config::PoolConfig;
 use crate::error::PoolError;
@@ -88,13 +89,36 @@ impl FifoBackend {
     }
 
     pub fn shutdown(&mut self) -> Result<(), PoolError> {
-        let Some(sender) = self.sender.take() else {
-            return Ok(());
-        };
-        for _ in 0..self.workers.len() {
-            sender.send(Message::Terminate)?;
+        self.signal_shutdown()?;
+        self.join_workers()
+    }
+
+    pub fn shutdown_timeout(&mut self, timeout: Duration) -> Result<(), PoolError> {
+        self.signal_shutdown()?;
+
+        let deadline = Instant::now() + timeout;
+        loop {
+            if self.workers.iter().all(|h| h.is_finished()) {
+                return self.join_workers();
+            }
+            if Instant::now() >= deadline {
+                return Err(PoolError::ShutdownTimeout);
+            }
+            thread::sleep(Duration::from_millis(1));
         }
-        drop(sender);
+    }
+
+    fn signal_shutdown(&mut self) -> Result<(), PoolError> {
+        if let Some(sender) = self.sender.take() {
+            for _ in 0..self.workers.len() {
+                sender.send(Message::Terminate)?;
+            }
+            drop(sender);
+        }
+        Ok(())
+    }
+
+    fn join_workers(&mut self) -> Result<(), PoolError> {
         for handle in self.workers.drain(..) {
             handle.join().map_err(|_| PoolError::ShutdownFailed)?;
         }
