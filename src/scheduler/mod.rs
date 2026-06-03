@@ -5,7 +5,7 @@ mod steal;
 
 use std::sync::Arc;
 
-use crate::config::SchedulerMode;
+use crate::config::{PoolConfig, SchedulerMode};
 use crate::error::PoolError;
 use crate::pool::PoolMetrics;
 use crate::task::Job;
@@ -19,10 +19,10 @@ pub(crate) enum PoolBackend {
 }
 
 impl PoolBackend {
-    pub fn new(mode: SchedulerMode, size: usize, metrics: Arc<PoolMetrics>) -> Self {
-        match mode {
-            SchedulerMode::Fifo => Self::Fifo(FifoBackend::new(size, metrics)),
-            SchedulerMode::Steal => Self::Steal(StealBackend::new(size, metrics)),
+    pub fn new(config: &PoolConfig, metrics: Arc<PoolMetrics>) -> Self {
+        match config.mode {
+            SchedulerMode::Fifo => Self::Fifo(FifoBackend::new(config, metrics)),
+            SchedulerMode::Steal => Self::Steal(StealBackend::new(config, metrics)),
         }
     }
 

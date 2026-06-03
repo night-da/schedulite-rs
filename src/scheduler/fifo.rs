@@ -3,6 +3,7 @@
 use std::sync::{mpsc, Arc, Mutex};
 use std::thread::{self, JoinHandle};
 
+use crate::config::PoolConfig;
 use crate::error::PoolError;
 use crate::pool::PoolMetrics;
 use crate::task::{run_job_safely, Job};
@@ -18,16 +19,18 @@ pub(crate) struct FifoBackend {
 }
 
 impl FifoBackend {
-    pub fn new(size: usize, metrics: Arc<PoolMetrics>) -> Self {
+    pub fn new(config: &PoolConfig, metrics: Arc<PoolMetrics>) -> Self {
         let (sender, receiver) = mpsc::channel();
         let receiver = Arc::new(Mutex::new(receiver));
-        let workers = (0..size)
+
+        let workers = (0..config.workers)
             .map(|_| {
                 let receiver = Arc::clone(&receiver);
                 let metrics = Arc::clone(&metrics);
                 thread::spawn(move || worker_loop(receiver, metrics))
             })
             .collect();
+
         Self {
             workers,
             sender: Some(sender),

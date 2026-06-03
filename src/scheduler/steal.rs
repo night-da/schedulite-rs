@@ -5,6 +5,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 
+use crate::config::PoolConfig;
 use crate::error::PoolError;
 use crate::pool::PoolMetrics;
 use crate::task::{run_job_safely, Job};
@@ -17,15 +18,15 @@ pub(crate) struct StealBackend {
 }
 
 impl StealBackend {
-    pub fn new(size: usize, metrics: Arc<PoolMetrics>) -> Self {
+    pub fn new(config: &PoolConfig, metrics: Arc<PoolMetrics>) -> Self {
         let injector = Arc::new(Mutex::new(VecDeque::new()));
-        let local_queues: Vec<_> = (0..size)
+        let local_queues: Vec<_> = (0..config.workers)
             .map(|_| Arc::new(Mutex::new(VecDeque::new())))
             .collect();
         let all_locals = Arc::new(local_queues.clone());
         let draining = Arc::new(AtomicBool::new(false));
 
-        let workers = (0..size)
+        let workers = (0..config.workers)
             .map(|worker_id| {
                 let local = Arc::clone(&local_queues[worker_id]);
                 let injector = Arc::clone(&injector);

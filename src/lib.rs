@@ -8,7 +8,7 @@ mod pool;
 mod scheduler;
 mod task;
 
-pub use config::SchedulerMode;
+pub use config::{PoolConfig, SchedulerMode};
 pub use error::PoolError;
-pub use pool::{PoolMetrics, PoolMetricsSnapshot, SchedulitePool};
+pub use pool::{PoolBuilder, PoolMetrics, PoolMetricsSnapshot, SchedulitePool};
 pub use task::TaskOutcome;
