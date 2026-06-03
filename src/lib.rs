@@ -2,6 +2,8 @@
 
 use std::error::Error;
 use std::fmt;
+use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use std::thread::{self, JoinHandle};
 
@@ -28,6 +30,49 @@ impl Error for PoolError {}
 
 type Job = Box<dyn FnOnce() + Send + 'static>;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TaskOutcome {
+    Completed,
+    Panicked,
+}
+
+// --- Metrics ---
+
+#[derive(Debug, Default)]
+pub struct PoolMetrics {
+    submitted: AtomicU64,
+    completed: AtomicU64,
+    panicked: AtomicU64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PoolMetricsSnapshot {
+    pub submitted: u64,
+    pub completed: u64,
+    pub panicked: u64,
+}
+
+impl PoolMetrics {
+    fn record_submitted(&self) {
+        self.submitted.fetch_add(1, Ordering::Relaxed);
+    }
+    fn record_completed(&self) {
+        self.completed.fetch_add(1, Ordering::Relaxed);
+    }
+    fn record_panicked(&self) {
+        self.panicked.fetch_add(1, Ordering::Relaxed);
+    }
+    pub fn snapshot(&self) -> PoolMetricsSnapshot {
+        PoolMetricsSnapshot {
+            submitted: self.submitted.load(Ordering::Relaxed),
+            completed: self.completed.load(Ordering::Relaxed),
+            panicked: self.panicked.load(Ordering::Relaxed),
+        }
+    }
+}
+
+// --- Message ---
+
 enum Message {
     NewJob(Job),
     Terminate,
@@ -38,6 +83,7 @@ enum Message {
 pub struct SchedulitePool {
     workers: Vec<JoinHandle<()>>,
     sender: Option<mpsc::Sender<Message>>,
+    metrics: Arc<PoolMetrics>,
 }
 
 impl SchedulitePool {
@@ -45,17 +91,20 @@ impl SchedulitePool {
         assert!(size > 0, "pool size must be greater than zero");
         let (sender, receiver) = mpsc::channel();
         let receiver = Arc::new(Mutex::new(receiver));
+        let metrics = Arc::new(PoolMetrics::default());
 
         let workers = (0..size)
             .map(|_| {
                 let receiver = Arc::clone(&receiver);
-                thread::spawn(move || worker_loop(receiver))
+                let metrics = Arc::clone(&metrics);
+                thread::spawn(move || worker_loop(receiver, metrics))
             })
             .collect();
 
         Self {
             workers,
             sender: Some(sender),
+            metrics,
         }
     }
 
@@ -67,7 +116,13 @@ impl SchedulitePool {
             .as_ref()
             .ok_or(PoolError::SubmitFailed)?
             .send(Message::NewJob(Box::new(f)))
-            .map_err(|_| PoolError::SubmitFailed)
+            .map_err(|_| PoolError::SubmitFailed)?;
+        self.metrics.record_submitted();
+        Ok(())
+    }
+
+    pub fn metrics_snapshot(&self) -> PoolMetricsSnapshot {
+        self.metrics.snapshot()
     }
 
     pub fn shutdown(&mut self) -> Result<(), PoolError> {
@@ -93,7 +148,20 @@ impl Drop for SchedulitePool {
     }
 }
 
-fn worker_loop(receiver: Arc<Mutex<mpsc::Receiver<Message>>>) {
+fn run_job_safely(job: Job, metrics: &PoolMetrics) -> TaskOutcome {
+    match catch_unwind(AssertUnwindSafe(job)) {
+        Ok(()) => {
+            metrics.record_completed();
+            TaskOutcome::Completed
+        }
+        Err(_) => {
+            metrics.record_panicked();
+            TaskOutcome::Panicked
+        }
+    }
+}
+
+fn worker_loop(receiver: Arc<Mutex<mpsc::Receiver<Message>>>, metrics: Arc<PoolMetrics>) {
     loop {
         let message = {
             let receiver = receiver.lock().unwrap_or_else(|e| e.into_inner());
@@ -101,7 +169,7 @@ fn worker_loop(receiver: Arc<Mutex<mpsc::Receiver<Message>>>) {
         };
         match message {
             Ok(Message::NewJob(job)) => {
-                let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(job));
+                let _ = run_job_safely(job, &metrics);
             }
             Ok(Message::Terminate) | Err(_) => break,
         }
@@ -126,7 +194,11 @@ mod tests {
             pool.submit(move || *counter.lock().unwrap() += 1).unwrap();
         }
         pool.shutdown().unwrap();
+        let m = pool.metrics_snapshot();
         assert_eq!(*counter.lock().unwrap(), 10);
+        assert_eq!(m.submitted, 10);
+        assert_eq!(m.completed, 10);
+        assert_eq!(m.panicked, 0);
     }
 
     #[test]
@@ -157,5 +229,24 @@ mod tests {
         let mut pool = SchedulitePool::new(1);
         pool.shutdown().unwrap();
         pool.shutdown().unwrap();
+    }
+
+    #[test]
+    fn panic_isolation() {
+        let mut pool = SchedulitePool::new(2);
+        for i in 0..100 {
+            pool.submit(move || {
+                if i % 10 == 0 {
+                    panic!("intentional panic in task {i}");
+                }
+            })
+            .unwrap();
+        }
+        pool.shutdown().unwrap();
+        let m = pool.metrics_snapshot();
+        assert_eq!(m.submitted, 100);
+        assert_eq!(m.completed, 90);
+        assert_eq!(m.panicked, 10);
+        assert_eq!(m.completed + m.panicked, m.submitted);
     }
 }
