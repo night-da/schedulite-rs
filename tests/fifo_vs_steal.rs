@@ -1,8 +1,8 @@
 //! Integration test: FIFO and Steal modes must produce equivalent results
 //! under the same workload, and stealing must occur under skewed submissions.
 
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use schedulite_rs::{PoolBuilder, PoolError, SchedulerMode};
 

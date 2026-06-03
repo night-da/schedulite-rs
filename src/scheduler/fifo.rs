@@ -1,13 +1,13 @@
 //! FIFO scheduler: shared `mpsc` channel and `Message::Terminate` shutdown.
 
-use std::sync::{mpsc, Arc, Mutex};
+use std::sync::{Arc, Mutex, mpsc};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 use crate::config::PoolConfig;
 use crate::error::PoolError;
 use crate::pool::PoolMetrics;
-use crate::task::{run_job_safely, Job};
+use crate::task::{Job, run_job_safely};
 
 enum Message {
     NewJob(Job),

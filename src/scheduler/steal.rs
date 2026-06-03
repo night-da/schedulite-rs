@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 use crate::config::PoolConfig;
 use crate::error::PoolError;
 use crate::pool::PoolMetrics;
-use crate::task::{run_job_safely, Job};
+use crate::task::{Job, run_job_safely};
 
 pub(crate) struct StealBackend {
     workers: Vec<JoinHandle<()>>,

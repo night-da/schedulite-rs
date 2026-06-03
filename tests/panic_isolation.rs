@@ -4,8 +4,8 @@
 //! completed + panicked counter must equal the submitted count and the
 //! pool must remain usable for a final job.
 
-use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 
 use schedulite_rs::{PoolBuilder, PoolError, SchedulerMode};
