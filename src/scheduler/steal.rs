@@ -18,6 +18,21 @@ pub(crate) struct StealBackend {
     queue_capacity: Option<usize>,
 }
 
+impl std::fmt::Debug for StealBackend {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("StealBackend")
+            .field("workers", &self.workers)
+            .field(
+                "injector_len",
+                &self.injector.lock().map(|q| q.len()).unwrap_or(0),
+            )
+            .field("local_queues", &self.local_queues.len())
+            .field("draining", &self.draining)
+            .field("queue_capacity", &self.queue_capacity)
+            .finish()
+    }
+}
+
 impl StealBackend {
     pub fn new(config: &PoolConfig, metrics: Arc<PoolMetrics>) -> Self {
         let injector = Arc::new(Mutex::new(VecDeque::new()));

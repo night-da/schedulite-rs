@@ -13,6 +13,15 @@ enum Message {
     Terminate,
 }
 
+impl std::fmt::Debug for Message {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NewJob(_) => f.debug_tuple("NewJob").finish(),
+            Self::Terminate => write!(f, "Terminate"),
+        }
+    }
+}
+
 #[derive(Debug)]
 enum Sender {
     Unbounded(mpsc::Sender<Message>),
@@ -40,6 +49,7 @@ impl Sender {
     }
 }
 
+#[derive(Debug)]
 pub(crate) struct FifoBackend {
     workers: Vec<JoinHandle<()>>,
     sender: Option<Sender>,

@@ -13,6 +13,8 @@ use crate::task::Job;
 pub(crate) use fifo::FifoBackend;
 pub(crate) use steal::StealBackend;
 
+/// Internal enum dispatching to FIFO or work-stealing implementations.
+#[derive(Debug)]
 pub(crate) enum PoolBackend {
     Fifo(FifoBackend),
     Steal(StealBackend),

@@ -67,6 +67,7 @@ impl Default for PoolBuilder {
 }
 
 /// Configurable thread pool with FIFO or work-stealing scheduling.
+#[derive(Debug)]
 pub struct SchedulitePool {
     mode: SchedulerMode,
     metrics: Arc<PoolMetrics>,
