@@ -3,6 +3,7 @@ use std::hash::Hasher;
 use std::thread;
 
 use schedulite_rs::{PoolBuilder, SchedulerMode};
+use threadpool::ThreadPool;
 
 fn hash_work(seed: u64, rounds: u32) -> u64 {
     let mut acc = seed;
@@ -60,6 +61,18 @@ fn bench_group(c: &mut Criterion, name: &str, workers: usize, tasks: usize) {
                 .unwrap();
             }
             drop(pool);
+        });
+    });
+
+    group.bench_function("threadpool_crate", |b| {
+        b.iter(|| {
+            let pool = ThreadPool::new(workers);
+            for i in 0..tasks {
+                pool.execute(move || {
+                    black_box(hash_work(i as u64, 10));
+                });
+            }
+            pool.join();
         });
     });
 
