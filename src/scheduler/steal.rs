@@ -15,6 +15,7 @@ pub(crate) struct StealBackend {
     injector: Arc<Mutex<VecDeque<Job>>>,
     local_queues: Vec<Arc<Mutex<VecDeque<Job>>>>,
     draining: Arc<AtomicBool>,
+    queue_capacity: Option<usize>,
 }
 
 impl StealBackend {
@@ -44,6 +45,15 @@ impl StealBackend {
             injector,
             local_queues,
             draining,
+            queue_capacity: config.queue_capacity,
+        }
+    }
+
+    fn queue_full(&self, queue: &VecDeque<Job>) -> bool {
+        if let Some(cap) = self.queue_capacity {
+            queue.len() >= cap
+        } else {
+            false
         }
     }
 
@@ -51,10 +61,11 @@ impl StealBackend {
         if self.draining.load(Ordering::Relaxed) {
             return Err(PoolError::SubmitFailed);
         }
-        self.injector
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .push_back(job);
+        let mut guard = self.injector.lock().unwrap_or_else(|e| e.into_inner());
+        if self.queue_full(&guard) {
+            return Err(PoolError::QueueFull);
+        }
+        guard.push_back(job);
         Ok(())
     }
 
@@ -66,10 +77,11 @@ impl StealBackend {
             .local_queues
             .get(worker_id)
             .ok_or(PoolError::SubmitFailed)?;
-        queue
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .push_back(job);
+        let mut guard = queue.lock().unwrap_or_else(|e| e.into_inner());
+        if self.queue_full(&guard) {
+            return Err(PoolError::QueueFull);
+        }
+        guard.push_back(job);
         Ok(())
     }
 

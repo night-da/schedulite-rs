@@ -278,6 +278,24 @@ mod tests {
     }
 
     #[test]
+    fn bounded_queue_rejects_when_full_fifo() {
+        let pool = PoolBuilder::new().workers(1).queue_capacity(1).build();
+        pool.submit(|| {}).unwrap();
+        assert_eq!(pool.submit(|| {}), Err(PoolError::QueueFull));
+    }
+
+    #[test]
+    fn bounded_queue_rejects_when_full_steal() {
+        let pool = PoolBuilder::new()
+            .workers(1)
+            .mode(SchedulerMode::Steal)
+            .queue_capacity(1)
+            .build();
+        pool.submit(|| {}).unwrap();
+        assert_eq!(pool.submit(|| {}), Err(PoolError::QueueFull));
+    }
+
+    #[test]
     fn steal_handles_skewed_local_submissions() {
         let mut pool = SchedulitePool::with_mode(4, SchedulerMode::Steal);
         let counter = Arc::new(Mutex::new(0));
